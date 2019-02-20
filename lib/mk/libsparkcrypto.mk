@@ -1,12 +1,12 @@
 
 include $(REP_DIR)/lib/import/import-libsparkcrypto.mk
 
-SRC_ADS = lsc-aes-tables.ads \
-          lsc-sha256-tables.ads
+SRC_ADS = lsc-sha256-tables.ads
 
 SRC_ADB = lsc-aes-print.adb \
 	  lsc-bignum-print.adb \
 	  lsc-ripemd160-print.adb \
+	  lsc-aes-tables.adb \
 	  lsc-types.adb \
 	  lsc-io.adb \
 	  lsc-aes-cbc.adb \
@@ -32,16 +32,20 @@ SRC_ADB = lsc-aes-print.adb \
 	  lsc-byteorder32.adb \
 	  lsc-byteorder64.adb
 
-LIBS += ada
+LIBS += spark
 
 # disable calls to 'system__arith_64__add_with_ovflo_check'
 CC_ADA_OPT += -gnato0
+CC_ADA_WARN_STRICT =
 
+vpath lsc-aes-tables.adb $(LSC_DIR)/ada/generic
 vpath lsc-aes-print.adb $(LSC_DIR)/ada/generic
 vpath lsc-bignum-print.adb $(LSC_DIR)/ada/generic
 vpath lsc-ripemd160-print.adb $(LSC_DIR)/ada/generic
 vpath lsc-types.adb $(LSC_DIR)/ada/generic
 vpath lsc-io.adb $(LSC_DIR)/ada/nullio
 vpath lsc-byteorder32.adb $(LSC_DIR)/shared/little_endian
+vpath lsc-byteorder64.adb $(LSC_DIR)/shared/little_endian
 vpath lsc-byteswap64.adb $(LSC_DIR)/ada/x86_64
+vpath %.ads $(LSC_DIR)/shared/generic
 vpath %.adb $(LSC_DIR)/shared/generic
