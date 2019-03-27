@@ -7,9 +7,6 @@ if {[have_spec pbxa9] || (![have_spec nova] && ![have_spec foc])} {
 	exit 0
 }
 
-#set mke2fs [check_installed mke2fs]
-#set dd     [check_installed dd]
-
 set build_components {
 	core init timer
 	app/avconv
@@ -17,24 +14,14 @@ set build_components {
 	drivers/framebuffer drivers/input
 	server/nitpicker server/nit_fb
 	app/launchpad app/pointer
-	test/mesa_demo/gears
 	server/fb_splitter
+	lib/vfs/rump
 }
 
 source ${genode_dir}/repos/base/run/platform_drv.inc
 append_platform_drv_build_components
 
 build $build_components
-
-#
-# Build EXT2-file-system image
-#
-#catch { exec $dd if=/dev/zero of=bin/ext2.raw bs=1M count=16 }
-#catch { exec $mke2fs -F bin/ext2.raw }
-
-#
-# Generate config
-#
 
 create_boot_directory
 
@@ -69,7 +56,7 @@ append config {
 		<affinity xpos="1" width="1" />
 		<provides><service name="Block" /></provides>
 		<config ata="yes">
-			<policy label="rump_fs" device="0" />
+			<policy label="avconv -> " device="0" writeable="yes" />
 		</config>
 	</start>}
 
@@ -116,8 +103,8 @@ append config {
 		<config>
 			<domain name="pointer" layer="1" content="client" label="no" origin="pointer" />
 			<domain name="default" layer="2" content="client" focus="click" hover="always" />
-			<policy label="pointer" domain="pointer"/>
-			<policy domain="default"/>
+			<policy label="pointer -> " domain="pointer"/>
+			<policy label="nit_fb -> " domain="default"/>
 		</config>
 		<route>
 			<service name="Input"><child name="input_drv"/></service>
@@ -143,19 +130,22 @@ append config {
 		<config xpos="100" ypos="100" width="576" height="408" />
 	</start>
 
+<!--
 	<start name="rump_fs">
-		<resource name="RAM" quantum="8M" />
+		<resource name="RAM" quantum="20M" />
 		<affinity xpos="1" width="1" />
 		<provides><service name="File_system"/></provides>
 		<config fs="ext2fs">
-			<policy label="avconv -> rump_fs" root="/" writeable="yes"/>
+			<policy label_prefix="avconv -> rump_fs" root="/" writeable="yes"/>
 		</config>
 		<route>
 			<service name="Block"><child name="ahci_drv"/></service>
 			<any-service><parent/><any-child/></any-service>
 		</route>
 	</start>
+-->
 
+<!--
 	<start name="eglgears">
 		<resource name="RAM" quantum="20M"/>
 		<route>
@@ -168,6 +158,7 @@ append config {
 			</libc>
 		</config>
 	</start>
+-->
 
 	<start name="timer">
 		<resource name="RAM" quantum="1M"/>
@@ -175,24 +166,23 @@ append config {
 	</start>
 
 	<start name="avconv">
-		<resource name="RAM" quantum="128M"/>
+		<resource name="RAM" quantum="150M"/>
 		<affinity xpos="1" width="1" />
 		<config>
 			<arg value="avconv"/>
 			<arg value="-f"/> <arg value="fbdev"/>
 			<arg value="-r"/> <arg value="10"/>
-			<arg value="-i"/> <arg value="dev/lxfb"/>
+			<arg value="-i"/> <arg value="/dev/lxfb"/>
 			<arg value="-t"/> <arg value="30"/>
 			<arg value="rump_fs/out.avi"/>
-			<libc stdout="/dev/log" stderr="/dev/log">
-				<vfs writable="yes">
-					<dir name="dev"><log/><lxfb/></dir>
-					<dir name="rump_fs"><fs label="rump_fs"/></dir>
-				</vfs>
-			</libc>
+			<vfs>
+				<dir name="dev"><log/><lxfb/></dir>
+				<dir name="rump_fs"><rump fs="ext2fs" ram="10M" writeable="yes" /></dir>
+			</vfs>
+			<libc stdout="/dev/log" stderr="/dev/log"/>
 		</config>
 		<route>
-			<service name="File_system"><child name="rump_fs"/></service>
+			<service name="Block"><child name="ahci_drv"/></service>
 			<service name="Framebuffer"><child name="fb_splitter"/></service>
 			<any-service><parent/><any-child/></any-service>
 		</route>
@@ -214,10 +204,12 @@ set boot_modules {
 	ld.lib.so libc.lib.so libm.lib.so posix.lib.so zlib.lib.so
 	avdevice.lib.so avfilter.lib.so avutil.lib.so avcodec.lib.so
 	avformat.lib.so swscale.lib.so
-	ahci_drv rump.lib.so rump_fs.lib.so rump_fs
+	ahci_drv vfs_rump.lib.so rump_fs.lib.so rump_fs
 	nitpicker nit_fb
-	launchpad gears pointer
+	launchpad pointer
 	fb_splitter
+	rump.lib.so
+	rump_fs.lib.so
 }
 
 lappend_if [have_spec       linux] boot_modules fb_sdl
@@ -231,8 +223,29 @@ build_boot_image $boot_modules
 
 append qemu_args " -smp 4,cores=4 "
 append qemu_args " -m 256"
-append qemu_args " -drive id=disk,file=bin/ext2.raw,if=none -device ahci,id=ahci -device ide-hd,drive=disk,bus=ahci.0 -boot d"
+#append qemu_args " -drive id=disk,file=bin/ext2.raw,if=none -device ahci,id=ahci -device ide-hd,drive=disk,bus=ahci.0 -boot d"
+
+
+
+set mkfs_cmd  [installed_command mke2fs]
+set mkfs_opts "-F"
+
+if {[catch { exec which $mkfs_cmd } ]} {
+	puts stderr "Error: $mkfs_cmd not installed, aborting test"; exit }
+
+set disk_image "bin/test.hda"
+set cmd "dd if=/dev/zero of=$disk_image bs=1024 count=65536"
+puts "creating disk image: $cmd"
+catch { exec sh -c $cmd }
+
+set cmd "$mkfs_cmd $mkfs_opts $disk_image"
+puts "formating disk: $cmd"
+catch { exec sh -c $cmd }
+
+append qemu_args " -drive id=disk,file=$disk_image,format=raw,if=none -device ahci,id=ahci -device ide-drive,drive=disk,bus=ahci.0 -boot d"
 
 run_genode_until {.*child "avconv" exited with exit value 0.*} 60
+
+exec rm -f $disk_image
 
 puts "Test succeeded"
